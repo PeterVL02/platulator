@@ -168,12 +168,48 @@ class WeirdInputTest(unittest.TestCase):
             (22.5, [(20, UNLIMITED), (1.25, UNLIMITED)], [1.25]),  # unit 1.25
             (20.6, [(5, UNLIMITED), (0.1, UNLIMITED)], [0.1, 0.1, 0.1]),  # unit 0.1
             (32.566, [(3.1415, UNLIMITED)], [3.1415, 3.1415]),  # unit 3.1415
-            # unit 1/2000 kg: a big table, but still exact
-            (66.283, [(20, UNLIMITED), (3.1415, UNLIMITED)], [20, 3.1415]),
         ]
         for target, available, expected in cases:
             with self.subTest(target=target, available=available):
                 self.assertEqual(_get_plates_dp(target, available), expected)
+
+
+class MinUnitTest(unittest.TestCase):
+    FINE_PLATES: PlateStock = ((20, UNLIMITED), (3.1415, UNLIMITED))  # GCD 1/2000 kg
+
+    def test_too_fine_plates_rejected(self) -> None:
+        """Plates whose GCD is below the default 0.1 kg would blow up the table."""
+        with self.assertRaises(ValueError):
+            _get_plates_dp(66.283, self.FINE_PLATES)
+
+    def test_lower_min_unit_allows_fine_plates(self) -> None:
+        """Lowering min_unit to the GCD itself lets the big but exact table run."""
+        self.assertEqual(
+            _get_plates_dp(66.283, self.FINE_PLATES, min_unit=0.0005), [20, 3.1415]
+        )
+
+    def test_gcd_equal_to_min_unit_passes(self) -> None:
+        """The bound is inclusive and exact: 0.1 kg plates pass the 0.1 kg default."""
+        self.assertEqual(
+            _get_plates_dp(20.6, [(5, UNLIMITED), (0.1, UNLIMITED)]), [0.1, 0.1, 0.1]
+        )
+
+    def test_higher_min_unit_rejects_default_plates(self) -> None:
+        """The default plates have GCD 0.5 kg, so a 1 kg minimum rejects them."""
+        with self.assertRaises(ValueError):
+            _get_plates_dp(60, min_unit=1)
+
+    def test_only_usable_plates_count(self) -> None:
+        """A lone 3.1415 kg plate can't be loaded on both sides, so it doesn't shrink the GCD."""
+        self.assertEqual(_get_plates_dp(60, [(20, UNLIMITED), (3.1415, 1)]), [20])
+
+    def test_get_plates_passes_min_unit(self) -> None:
+        """get_plates passes min_unit through."""
+        self.assertEqual(
+            get_plates(66.283, self.FINE_PLATES, min_unit=0.0005), "20, 3.1415"
+        )
+        with self.assertRaises(ValueError):
+            get_plates(66.283, self.FINE_PLATES)
 
 
 class FindUnitTest(unittest.TestCase):

@@ -2,11 +2,11 @@ import math
 from collections.abc import Sequence
 from fractions import Fraction
 
-from validation import validate_plate_weights, validate_weights
+from .validation import validate_plate_weights, validate_weights
 
 UNLIMITED = sentinel("UNLIMITED")
-type PlateCount = int | UNLIMITED 
-type PlateStock = Sequence[tuple[float, PlateCount]]  ## (plate kgs)
+type PlateCount = int | UNLIMITED
+type PlateStock = Sequence[tuple[float, PlateCount]]  ## (plate kg, total count in gym (or UNLIMITED))
 
 PLATES: PlateStock = [
     (20.0, UNLIMITED),
@@ -16,7 +16,8 @@ PLATES: PlateStock = [
     (2.5, UNLIMITED),
     (1.5, UNLIMITED),
 ]
-BARBELL_WEIGHT: float = 20.0  ## in kgs
+BARBELL_WEIGHT: float = 20.0  ## in kg
+MIN_UNIT: float = 0.1
 
 
 def _find_unit(weights: list[float]) -> Fraction:
@@ -43,13 +44,14 @@ def _to_units(
         return Fraction(1), []
     unit = _find_unit([w for w, _ in usable])
     stock = [(round(Fraction(str(w)) / unit), count) for w, count in usable]
-    return unit, sorted(stock, key=lambda plate: plate[0]) # type: ignore (Pylance doesn't understand PEP 661 sentinels in annotations yet)
+    return unit, sorted(stock, key=lambda plate: plate[0])  # type: ignore (Pylance doesn't understand PEP 661 sentinels in annotations yet)
 
 
 def _get_plates_dp(
     target_weight: float,
     available: PlateStock = PLATES,
     bar_weight: float = BARBELL_WEIGHT,
+    min_unit: float = MIN_UNIT,
 ) -> list[float]:
     """Calculates which plates to put on the barbell.
     Important: the output shows what plates to put on
@@ -66,7 +68,7 @@ def _get_plates_dp(
         available (PlateStock, optional): (plate weight, count) pairs. The count is the total
             in the gym, so half of it (rounded down) can go on each side. Defaults to PLATES.
         bar_weight (float, optional): Weight of the empty bar in kgs. Defaults to BARBELL_WEIGHT.
-
+        min_unit (float, optional): Minimum unit for rounding. Defaults to MIN_UNIT.
     Returns:
         list[float]: List of plates to put on one side of the bar, heaviest first.
 
@@ -74,16 +76,16 @@ def _get_plates_dp(
         ValueError: On bad input, see platulator.validation."""
     validate_weights(target_weight, bar_weight)
     validate_plate_weights([weight for weight, _ in available])
-    unit, stock = _to_units(available)
+    gcd, stock = _to_units(available)
     if not stock:
         return []
+    if gcd < Fraction(str(min_unit)):
+        raise ValueError(
+            f"Plate weights {', '.join(str(w) for w, _ in available)} "
+            f"have GCD {gcd} < minimum unit {min_unit}"
+        )
 
-    # Kept unrounded: rounding here and again when picking the nearest sum can
-    # pick the wrong side of a fake tie (27.4 kg would load 26, not 28).
-    side = (target_weight - bar_weight) / 2 / unit
-    # The lightest reachable sum above side minus any of its plates is <= side,
-    # so the nearest reachable sum is never past side + the biggest plate.
-    # ponytail: table size grows with 1/unit, so odd plates like 3.1415 kg make it slow.
+    side = (target_weight - bar_weight) / 2 / gcd
     limit = math.ceil(side) + stock[-1][0]
 
     # min_plates[a]: fewest plates summing to a; picks[i][a]: how many of plate i that uses.
@@ -108,7 +110,7 @@ def _get_plates_dp(
     )
     plates: list[float] = []
     for (coin, _), pick in reversed(list(zip(stock, picks))):
-        plates += [float(coin * unit)] * pick[best]
+        plates += [float(coin * gcd)] * pick[best]
         best -= coin * pick[best]
     return plates
 
@@ -117,6 +119,7 @@ def get_plates(
     target_weight: float,
     available: PlateStock = PLATES,
     bar_weight: float = BARBELL_WEIGHT,
+    min_unit: float = MIN_UNIT,
 ) -> str:
     """Calculates which plates to put on the barbell.
     Important: the output shows what plates to put on
@@ -127,13 +130,14 @@ def get_plates(
         target_weight (float): Target weight in kgs. Rounded to nearest possible sequence.
         available (PlateStock, optional): (plate weight, total count) pairs. Defaults to PLATES.
         bar_weight (float, optional): Weight of the empty bar in kgs. Defaults to BARBELL_WEIGHT.
+        min_unit (float, optional): Minimum unit for rounding. Defaults to MIN_UNIT.
 
     Returns:
         str: List of plates to put on one side of the bar, heaviest first.
 
     Raises:
         ValueError: On bad input, see _get_plates_dp."""
-    plates = _get_plates_dp(target_weight, available, bar_weight)
+    plates = _get_plates_dp(target_weight, available, bar_weight, min_unit)
     plates_formatted: list[int | float] = [
         int(p) if p.is_integer() else p for p in plates
     ]
