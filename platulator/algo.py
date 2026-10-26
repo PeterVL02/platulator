@@ -1,10 +1,12 @@
 import math
+from collections.abc import Sequence
 from fractions import Fraction
 
-from platulator.validation import validate_plate_weights, validate_weights
+from validation import validate_plate_weights, validate_weights
 
 UNLIMITED = sentinel("UNLIMITED")
-type PlateStock = list[tuple[float, int | UNLIMITED]]  ## (plate kgs, plates in the gym)
+type PlateCount = int | UNLIMITED 
+type PlateStock = Sequence[tuple[float, PlateCount]]  ## (plate kgs)
 
 PLATES: PlateStock = [
     (20.0, UNLIMITED),
@@ -29,11 +31,11 @@ def _find_unit(weights: list[float]) -> Fraction:
 
 def _to_units(
     available: PlateStock,
-) -> tuple[Fraction, list[tuple[int, int | UNLIMITED]]]:
+) -> tuple[Fraction, list[tuple[int, PlateCount]]]:
     """Express the usable plates (two or more, one per side) as whole multiples of their GCD.
 
     Returns:
-        tuple[Fraction, list[tuple[int, int | UNLIMITED]]]: The unit in kgs, and
+        tuple[Fraction, list[tuple[int, PlateCount]]]: The unit in kgs, and
             (plate in units, count) pairs lightest first, so heavier plates win DP ties.
             The list is empty when no plate can be loaded on both sides."""
     usable = [(w, count) for w, count in available if count is UNLIMITED or count >= 2]
@@ -41,7 +43,7 @@ def _to_units(
         return Fraction(1), []
     unit = _find_unit([w for w, _ in usable])
     stock = [(round(Fraction(str(w)) / unit), count) for w, count in usable]
-    return unit, sorted(stock, key=lambda plate: plate[0])
+    return unit, sorted(stock, key=lambda plate: plate[0]) # type: ignore (Pylance doesn't understand PEP 661 sentinels in annotations yet)
 
 
 def _get_plates_dp(
